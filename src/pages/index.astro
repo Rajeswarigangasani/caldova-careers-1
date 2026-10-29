@@ -3,7 +3,8 @@ import { getCollection } from 'astro:content';
 import Layout from '../layouts/Layout.astro';
 import RoleCard from '../components/RoleCard.astro';
 import EmptyState from '../components/EmptyState.astro';
-import { sortByNewest } from '../lib/jobs';
+import DepartmentFilter from '../components/DepartmentFilter.astro';
+import { getDepartments, sortByNewest } from '../lib/jobs';
 import type { Job } from '../types/job';
 
 export const prerender = true;
@@ -12,6 +13,7 @@ const entries = await getCollection('jobs');
 const jobs: Job[] = sortByNewest(
     entries.map((entry) => ({ slug: entry.id, ...entry.data })),
 );
+const departments = getDepartments(jobs);
 ---
 
 <Layout title="Caldova Careers — Open roles">
@@ -29,12 +31,84 @@ const jobs: Job[] = sortByNewest(
     {jobs.length === 0 ? (
       <EmptyState text="There are no open roles right now. Check back soon." />
     ) : (
+      <DepartmentFilter departments={departments} />
+      <p class="sr-only" role="status" data-testid="results-count"></p>
       <div
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
         data-testid="roles-grid"
       >
-        {jobs.map((job) => <RoleCard job={job} />)}
+        {jobs.map((job) => (
+          <div data-role-item data-department={job.department}>
+            <RoleCard job={job} />
+          </div>
+        ))}
+      </div>
+      <div id="no-matching-roles" hidden>
+        <EmptyState>
+          <p class="text-slate-300 mb-4" data-testid="empty-state-text">
+            No open roles match this department.
+          </p>
+          <button
+            type="button"
+            id="clear-filter"
+            data-testid="clear-filter"
+            class="rounded-lg bg-[#2E6CFC] px-4 py-2 font-medium text-white hover:bg-blue-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F4F7FC]"
+          >
+            Show all roles
+          </button>
+        </EmptyState>
       </div>
     )}
   </div>
 </Layout>
+
+<script>
+  const select = document.querySelector<HTMLSelectElement>('#department-filter');
+  const items = document.querySelectorAll<HTMLElement>('[data-role-item]');
+  const grid = document.querySelector<HTMLElement>('[data-testid="roles-grid"]');
+  const emptyState = document.querySelector<HTMLElement>('#no-matching-roles');
+  const status = document.querySelector<HTMLElement>('[data-testid="results-count"]');
+  const clearButton = document.querySelector<HTMLButtonElement>('#clear-filter');
+
+  /**
+   * Show only role items in the given department and update the empty state
+   * and live-region count.
+   *
+   * @param department - Department to show, or an empty string for all roles.
+   */
+  function applyFilter(department: string): void {
+    let visibleCount = 0;
+    items.forEach((item) => {
+      const matches = !department || item.dataset.department === department;
+      item.hidden = !matches;
+      if (matches) visibleCount += 1;
+    });
+    if (grid) grid.hidden = visibleCount === 0;
+    if (emptyState) emptyState.hidden = visibleCount !== 0;
+    if (status) status.textContent = `${visibleCount} open ${visibleCount === 1 ? 'role' : 'roles'} shown`;
+  }
+
+  /**
+   * Sync the select, visible roles, and `department` query parameter.
+   *
+   * @param department - Department to select, or an empty string for all roles.
+   */
+  function setDepartment(department: string): void {
+    if (!select) return;
+    select.value = department;
+    applyFilter(select.value);
+    const url = new URL(window.location.href);
+    if (select.value) url.searchParams.set('department', select.value);
+    else url.searchParams.delete('department');
+    history.replaceState(null, '', url);
+  }
+
+  if (select) {
+    select.addEventListener('change', () => setDepartment(select.value));
+    clearButton?.addEventListener('click', () => {
+      setDepartment('');
+      select.focus();
+    });
+    setDepartment(new URLSearchParams(window.location.search).get('department') ?? '');
+  }
+</script>
